@@ -3,7 +3,7 @@ use super::*;
 use soroban_sdk::{Env, Symbol, symbol_short, Address};
 
 #[test]
-test_traveler_booking_list_partitioning() {
+fn test_traveler_booking_list_partitioning() {
     let env = Env::default();
     env.ledger().set_timestamp(1000);
     let passenger = Address::generate(&env);

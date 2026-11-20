@@ -1,4 +1,4 @@
-use soroban_sdk::{contracttype, Address, Env, Symbol, Vec};
+use soroban_sdk::{contracttype, Address, Env, Symbol, Vec, symbol_short};
 use crate::{Booking, BookingStorage};
 
 #[contracttype]
