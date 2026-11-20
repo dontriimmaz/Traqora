@@ -1,12 +1,6 @@
-#![no_std]
-// Booking-style contract entrypoints legitimately need many arguments;
-// soroban macro-generated clients re-declare these signatures.
-#![allow(clippy::too_many_arguments)]
+use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, String, Symbol, Vec};
 use contract_events::{Action, Domain};
-use soroban_sdk::{
-    contract, contractclient, contractimpl, contracttype, symbol_short, token, Address, Env,
-    String, Symbol, Vec,
-};
+
 
 #[contractclient(name = "BookingReceiptClient")]
 #[allow(clippy::too_many_arguments)]
@@ -601,5 +595,59 @@ impl BookingContract {
                 refunded_amount,
             ),
         );
+    }
+}
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ReconciliationAuditRecord {
+    pub correlation_id: String,
+    pub actor: Address,
+    pub timestamp: u64,
+    pub state_before: String,
+    pub state_after: String,
+    pub decision: String,
+}
+
+#[contract]
+pub struct BookingReconciliationContract;
+
+#[contractimpl]
+impl BookingReconciliationContract {
+    pub fn record_audit(
+        env: Env,
+        correlation_id: String,
+        actor: Address,
+        state_before: String,
+        state_after: String,
+        decision: String,
+    ) -> ReconciliationAuditRecord {
+        actor.require_auth();
+        let timestamp = env.ledger().timestamp();
+        let record = ReconciliationAuditRecord {
+            correlation_id,
+            actor,
+            timestamp,
+            state_before,
+            state_after,
+            decision,
+        };
+        let key = Symbol::new(&env, "AuditTrail");
+        let mut records: Vec<ReconciliationAuditRecord> = env
+            .storage()
+            .instance()
+            .get(&key)
+            .unwrap_or(Vec::new(&env));
+        records.push_back(record.clone());
+        env.storage().instance().set(&key, &records);
+        env.storage().instance().extend_ttl(100, 100);
+        record
+    }
+
+    pub fn get_audit_trail(env: Env) -> Vec<ReconciliationAuditRecord> {
+        let key = Symbol::new(&env, "AuditTrail");
+        env.storage()
+            .instance()
+            .get(&key)
+            .unwrap_or(Vec::new(&env))
     }
 }
