@@ -26,9 +26,22 @@ pub struct Booking {
 
 #[contracttype]
 #[derive(Clone)]
+pub struct ReconciliationAuditRecord {
+    pub audit_id: u64,
+    pub actor: Address,
+    pub timestamp: u64,
+    pub correlation_id: Symbol,
+    pub state_change: Symbol,
+    pub details: Symbol,
+}
+
+#[contracttype]
+#[derive(Clone)]
 enum DataKey {
     NextId,
     Booking(u64),
+    NextAuditId,
+    Audit(u64),
 }
 
 #[contract]
@@ -48,6 +61,111 @@ impl FlightBookingContract {
 
         let seat_key = (symbol_short!("seat"), flight_id.clone(), seat.clone());
         if env.storage().persistent().has(&seat_key) {
+            panic!("Seat already reserved");
+        }
+
+        let booking_id: u64 = env.storage().instance().get(&DataKey::NextId).unwrap_or(1);
+        let created_at = env.ledger().timestamp();
+
+        let booking = Booking {
+            booking_id,
+            passenger: passenger.clone(),
+            flight_id: flight_id.clone(),
+            seat: seat.clone(),
+            amount,
+            escrowed_amount: 0,
+            state: BookingState::Pending,
+            created_at,
+        };
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::Booking(booking_id), &booking);
+        env.storage().persistent().set(&seat_key, &booking_id);
+        env.storage()
+            .instance()
+            .set(&DataKey::NextId, &(booking_id + 1));
+
+        contract_events::emit(
+            &env,
+            Domain::Seat,
+            Action::Reserved,
+            (
+                passenger.clone(),
+                created_at,
+                booking_id,
+                flight_id,
+                seat,
+                amount,
+            ),
+        );
+
+        booking_id
+    }
+
+    pub fn get_booking(env: Env, booking_id: u64) -> Option<Booking> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::Booking(booking_id))
+    }
+
+    pub fn record_reconciliation_audit(
+        env: Env,
+        actor: Address,
+        correlation_id: Symbol,
+        state_change: Symbol,
+        details: Symbol,
+    ) -> u64 {
+        actor.require_auth();
+        let audit_id: u64 = env.storage().instance().get(&DataKey::NextAuditId).unwrap_or(1);
+        let timestamp = env.ledger().timestamp();
+
+        let record = ReconciliationAuditRecord {
+            audit_id,
+            actor: actor.clone(),
+            timestamp,
+            correlation_id,
+            state_change,
+            details,
+        };
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::Audit(audit_id), &record);
+        env.storage()
+            .instance()
+            .set(&DataKey::NextAuditId, &(audit_id + 1));
+
+        audit_id
+    }
+
+    pub fn get_reconciliation_audit(env: Env, audit_id: u64) -> Option<ReconciliationAuditRecord> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::Audit(audit_id))
+    }
+
+    pub fn init_upgrade_owner(env: Env, owner: Address) {
+        access::UpgradeTimelock::init_upgrade_owner(&env, &owner);
+    }
+
+    pub fn reconcile_booking_reference(
+        env: Env,
+        passenger: Address,
+        flight_id: Symbol,
+        seat: Symbol,
+        amount: i128,
+        request_ref: Symbol,
+    ) -> u64 {
+        passenger.require_auth();
+        assert!(amount > 0, "Invalid amount");
+
+        let seat_key = (symbol_short!("seat"), flight_id.clone(), seat.clone());
+        if let Some(existing_id) = env.storage().persistent().get::<_, u64>(&seat_key) {
+            let existing_booking: Booking = env.storage().persistent().get(&DataKey::Booking(existing_id)).unwrap();
+            if existing_booking.passenger == passenger {
+                return existing_id;
+            }
             panic!("Seat already reserved");
         }
 
@@ -88,15 +206,5 @@ impl FlightBookingContract {
         );
 
         booking_id
-    }
-
-    pub fn get_booking(env: Env, booking_id: u64) -> Option<Booking> {
-        env.storage()
-            .persistent()
-            .get(&DataKey::Booking(booking_id))
-    }
-
-    pub fn init_upgrade_owner(env: Env, owner: Address) {
-        access::UpgradeTimelock::init_upgrade_owner(&env, &owner);
     }
 }

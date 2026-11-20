@@ -334,7 +334,48 @@ impl BookingContract {
 
     // Helper to get booking details
     pub fn get_booking(env: Env, booking_id: u64) -> Option<Booking> {
-        BookingStorage::get(&env, booking_id)
+        env.storage().persistent().get(&DataKey::Booking(booking_id))
+    }
+
+    /// Retrieves all bookings associated with a specific passenger address.
+    /// Returns a vector of Booking structures.
+    pub fn get_passenger_bookings(env: Env, passenger: Address) -> Vec<Booking> {
+        let ids: Vec<u64> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::PassengerBookings(passenger))
+            .unwrap_or_else(|| Vec::new(&env));
+        let mut bookings = Vec::new(&env);
+        for id in ids.iter() {
+            if let Some(booking) = Self::get_booking(env.clone(), id) {
+                bookings.push_back(booking);
+            }
+        }
+        bookings
+    }
+
+    /// Retrieves upcoming bookings for a passenger where departure time is greater than or equal to current_time.
+    pub fn get_passenger_upcoming_bookings(env: Env, passenger: Address, current_time: u64) -> Vec<Booking> {
+        let all = Self::get_passenger_bookings(env.clone(), passenger);
+        let mut upcoming = Vec::new(&env);
+        for booking in all.iter() {
+            if booking.departure_time >= current_time {
+                upcoming.push_back(booking);
+            }
+        }
+        upcoming
+    }
+
+    /// Retrieves past bookings for a passenger where departure time is strictly less than current_time.
+    pub fn get_passenger_past_bookings(env: Env, passenger: Address, current_time: u64) -> Vec<Booking> {
+        let all = Self::get_passenger_bookings(env.clone(), passenger);
+        let mut past = Vec::new(&env);
+        for booking in all.iter() {
+            if booking.departure_time < current_time {
+                past.push_back(booking);
+            }
+        }
+        past
     }
 
     // Original API wrappers for backward compatibility

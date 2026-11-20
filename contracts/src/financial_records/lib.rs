@@ -11,6 +11,18 @@ pub struct PaymentRecord {
     pub recorded_at: u64,
 }
 
+/// A reconciliation audit record containing actor, timestamp, correlation identifiers, and state changes.
+#[contracttype]
+#[derive(Clone)]
+pub struct ReconciliationAuditRecord {
+    pub audit_id: u64,
+    pub actor: Address,
+    pub timestamp: u64,
+    pub correlation_id: Symbol,
+    pub state_change: Symbol,
+    pub details: Symbol,
+}
+
 // ── Storage helpers ──────────────────────────────────────────────────────────
 
 fn payment_key(payment_id: u64) -> (Symbol, u64) {
@@ -19,6 +31,14 @@ fn payment_key(payment_id: u64) -> (Symbol, u64) {
 
 fn next_payment_key() -> Symbol {
     symbol_short!("nxt_pay")
+}
+
+fn reconciliation_audit_key(audit_id: u64) -> (Symbol, u64) {
+    (symbol_short!("recon_aud"), audit_id)
+}
+
+fn next_reconciliation_audit_key() -> Symbol {
+    symbol_short!("nxt_rcad")
 }
 
 // ── Contract ─────────────────────────────────────────────────────────────────
@@ -67,6 +87,47 @@ impl FinancialRecordsContract {
             .persistent()
             .get(&payment_key(payment_id))
             .expect("payment not found")
+    }
+
+    /// Record a reconciliation audit event.
+    pub fn record_reconciliation_audit(
+        env: Env,
+        actor: Address,
+        correlation_id: Symbol,
+        state_change: Symbol,
+        details: Symbol,
+        timestamp: u64,
+    ) -> u64 {
+        actor.require_auth();
+        let audit_id: u64 = env
+            .storage()
+            .instance()
+            .get(&next_reconciliation_audit_key())
+            .unwrap_or(1u64);
+        env.storage()
+            .instance()
+            .set(&next_reconciliation_audit_key(), &(audit_id + 1));
+
+        let record = ReconciliationAuditRecord {
+            audit_id,
+            actor,
+            timestamp,
+            correlation_id,
+            state_change,
+            details,
+        };
+        env.storage()
+            .persistent()
+            .set(&reconciliation_audit_key(audit_id), &record);
+        audit_id
+    }
+
+    /// Retrieve a reconciliation audit record by id.
+    pub fn get_reconciliation_audit(env: Env, audit_id: u64) -> ReconciliationAuditRecord {
+        env.storage()
+            .persistent()
+            .get(&reconciliation_audit_key(audit_id))
+            .expect("audit record not found")
     }
 }
 

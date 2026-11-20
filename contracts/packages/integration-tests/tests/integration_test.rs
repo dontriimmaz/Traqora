@@ -123,3 +123,44 @@ fn test_soroban_transaction_envelope_rebuild_and_expiry_flow() {
     assert!(!envelope.is_expired(12, 1500));
     assert_eq!(envelope.sequence_number, 12);
 }
+
+#[test]
+fn test_reconciliation_audit_trail_normal_and_validation_paths() {
+    let env = new_env();
+    let actors = generate_actors(&env);
+    let contracts = register_contracts(&env);
+
+    let correlation_id = Symbol::new(&env, "recon_tx_123");
+    let state_change = Symbol::new(&env, "escrow_released");
+    let details = Symbol::new(&env, "verified_balance_match");
+
+    // Normal path: record reconciliation audit with proper authorization
+    let audit_id = contracts.flight_booking.record_reconciliation_audit(
+        &actors.admin,
+        &correlation_id,
+        &state_change,
+        &details,
+    );
+    assert_eq!(audit_id, 1);
+
+    let record_opt = contracts.flight_booking.get_reconciliation_audit(&audit_id);
+    assert!(record_opt.is_some());
+    let record = record_opt.unwrap();
+    assert_eq!(record.audit_id, 1);
+    assert_eq!(record.actor, actors.admin);
+    assert_eq!(record.correlation_id, correlation_id);
+    assert_eq!(record.state_change, state_change);
+    assert_eq!(record.details, details);
+    assert!(record.timestamp > 0);
+
+    // Validation / failure path: unauthenticated caller or wrong actor auth panics
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        contracts.flight_booking.record_reconciliation_audit(
+            &actors.passenger,
+            &correlation_id,
+            &state_change,
+            &details,
+        );
+    }));
+    assert!(result.is_err());
+}

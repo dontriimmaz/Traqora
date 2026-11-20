@@ -338,3 +338,35 @@ fn test_flight_booking_reconcile_reference_timeout_recovery() {
     let id2 = client.reconcile_booking_reference(&passenger, &flight_id, &seat, &1_500, &request_ref);
     assert_eq!(id1, id2);
 }
+
+#[test]
+fn test_confirmation_prerequisites_normal_and_failure_paths() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let passenger = Address::generate(&env);
+    let contract_id = env.register(FlightBookingContract, ());
+    let client = FlightBookingContractClient::new(&env, &contract_id);
+
+    let flight_id = Symbol::new(&env, "FLPREREQ");
+    let seat = Symbol::new(&env, "20A");
+
+    // Attempting confirmation/reconciliation with zero amount should fail prerequisites check
+    let res_zero = client.try_reconcile_booking_reference(&passenger, &flight_id, &seat, &0, &Symbol::new(&env, "req_zero"));
+    assert!(res_zero.is_err(), "zero amount must fail booking confirmation prerequisites");
+
+    // Attempting confirmation/reconciliation with negative amount should fail prerequisites check
+    let res_neg = client.try_reconcile_booking_reference(&passenger, &flight_id, &seat, &-100, &Symbol::new(&env, "req_neg"));
+    assert!(res_neg.is_err(), "negative amount must fail booking confirmation prerequisites");
+
+    // Satisfying all prerequisites (valid positive amount and unique request reference) should succeed normally
+    let request_ref = Symbol::new(&env, "req_valid_1");
+    let booking_id = client.reconcile_booking_reference(&passenger, &flight_id, &seat, &2_500, &request_ref);
+    let booking = client.get_booking(&booking_id).unwrap();
+    assert_eq!(booking.booking_id, booking_id);
+    assert_eq!(booking.state, flight_booking::BookingState::Confirmed);
+    assert_eq!(booking.escrowed_amount, 2_500);
+
+    // Premature / duplicate confirmation retry with the same request reference adheres to idempotency without violating prerequisites
+    let booking_id_retry = client.reconcile_booking_reference(&passenger, &flight_id, &seat, &2_500, &request_ref);
+    assert_eq!(booking_id, booking_id_retry);
+}

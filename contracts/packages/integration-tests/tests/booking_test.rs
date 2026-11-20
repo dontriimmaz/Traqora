@@ -87,3 +87,61 @@ fn test_refund_flow() {
     assert_eq!(booking.status, Symbol::new(&env, "refunded"));
     assert_eq!(booking.amount_escrowed, 0);
 }
+
+#[test]
+fn test_traveler_booking_list_upcoming_and_past() {
+    let env = new_env();
+    env.ledger().set_timestamp(1700000000);
+
+    let actors = generate_actors(&env);
+    let contracts = register_contracts(&env);
+    initialize_token(&env, &contracts.token, &actors.admin);
+
+    let price = 100_0000000i128;
+
+    // Past booking: departure time before current time (1700000000)
+    let past_departure = 1650000000;
+    let past_booking_id = contracts.booking.create_booking(
+        &actors.passenger,
+        &actors.airline,
+        &Symbol::new(&env, "PAST123"),
+        &Symbol::new(&env, "JFK"),
+        &Symbol::new(&env, "LAX"),
+        &past_departure,
+        &price,
+        &contracts.token.address,
+    );
+
+    // Upcoming booking: departure time after current time
+    let upcoming_departure = 1750000000;
+    let upcoming_booking_id = contracts.booking.create_booking(
+        &actors.passenger,
+        &actors.airline,
+        &Symbol::new(&env, "UPC456"),
+        &Symbol::new(&env, "LAX"),
+        &Symbol::new(&env, "SFO"),
+        &upcoming_departure,
+        &price,
+        &contracts.token.address,
+    );
+
+    let all_bookings = contracts.booking.get_passenger_bookings(&actors.passenger);
+    assert_eq!(all_bookings.len(), 2);
+
+    let upcoming = contracts.booking.get_passenger_upcoming_bookings(&actors.passenger, &1700000000);
+    assert_eq!(upcoming.len(), 1);
+    let up_b = upcoming.get(0).unwrap();
+    assert_eq!(up_b.booking_id, upcoming_booking_id);
+    assert_eq!(up_b.flight_number, Symbol::new(&env, "UPC456"));
+    assert_eq!(up_b.from_airport, Symbol::new(&env, "LAX"));
+    assert_eq!(up_b.to_airport, Symbol::new(&env, "SFO"));
+    assert_eq!(up_b.departure_time, upcoming_departure);
+    assert_eq!(up_b.status, Symbol::new(&env, "pending"));
+
+    let past = contracts.booking.get_passenger_past_bookings(&actors.passenger, &1700000000);
+    assert_eq!(past.len(), 1);
+    let past_b = past.get(0).unwrap();
+    assert_eq!(past_b.booking_id, past_booking_id);
+    assert_eq!(past_b.flight_number, Symbol::new(&env, "PAST123"));
+    assert_eq!(past_b.departure_time, past_departure);
+}
