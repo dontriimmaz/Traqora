@@ -1,6 +1,5 @@
-use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, String, Symbol, Vec};
+use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, token, Address, Env, String, Symbol, Vec};
 use contract_events::{Action, Domain};
-
 
 #[contractclient(name = "BookingReceiptClient")]
 #[allow(clippy::too_many_arguments)]
@@ -31,8 +30,19 @@ pub struct Booking {
     pub price: i128,
     pub token: Address,
     pub amount_escrowed: i128,
-    pub status: Symbol, // "pending", "confirmed", "completed", "cancelled", "refunded"
+    pub status: Symbol,
     pub created_at: u64,
+}
+
+#[contracttype]
+#[derive(Clone)]
+pub struct ReconciliationAuditRecord {
+    pub booking_id: u64,
+    pub actor: Address,
+    pub timestamp: u64,
+    pub correlation_id: Symbol,
+    pub decision_status: Symbol,
+    pub details: Symbol,
 }
 
 #[contracttype]
@@ -62,6 +72,16 @@ impl BookingStorage {
 
     pub fn set(env: &Env, booking_id: u64, booking: &Booking) {
         env.storage().persistent().set(&booking_id, booking);
+    }
+
+    pub fn get_audit_record(env: &Env, booking_id: u64) -> Option<ReconciliationAuditRecord> {
+        let key = (symbol_short!("audit"), booking_id);
+        env.storage().persistent().get(&key)
+    }
+
+    pub fn set_audit_record(env: &Env, record: &ReconciliationAuditRecord) {
+        let key = (symbol_short!("audit"), record.booking_id);
+        env.storage().persistent().set(&key, record);
     }
 
     pub fn get_trusted_oracle(env: &Env) -> Option<Address> {
@@ -104,7 +124,6 @@ pub struct BookingContract;
 #[allow(clippy::too_many_arguments)]
 #[contractimpl]
 impl BookingContract {
-    // Register the trusted oracle contract address
     pub fn initialize_oracle(env: Env, admin: Address, oracle: Address) {
         admin.require_auth();
         BookingStorage::set_trusted_oracle(&env, &oracle);
@@ -121,7 +140,6 @@ impl BookingContract {
         BookingStorage::set_receipt_contract(&env, &receipt_contract);
     }
 
-    // Initialize booking - starts in "pending" status until paid
     #[allow(clippy::too_many_arguments)]
     pub fn create_booking(
         env: Env,
@@ -140,7 +158,7 @@ impl BookingContract {
 
         let booking = Booking {
             booking_id,
-            passenger,
+            passenger: passenger.clone(),
             airline,
             flight_number,
             from_airport,
@@ -155,7 +173,16 @@ impl BookingContract {
 
         BookingStorage::set(&env, booking_id, &booking);
 
-        // Canonical schema: (actor, timestamp, primary_id, ...payload)
+        let audit = ReconciliationAuditRecord {
+            booking_id,
+            actor: passenger.clone(),
+            timestamp: env.ledger().timestamp(),
+            correlation_id: symbol_short!("init"),
+            decision_status: symbol_short!("pending"),
+            details: symbol_short!("created"),
+        };
+        BookingStorage::set_audit_record(&env, &audit);
+
         contract_events::emit(
             &env,
             Domain::Booking,
@@ -173,8 +200,7 @@ impl BookingContract {
         booking_id
     }
 
-    // Accept payment for the booking and hold in escrow
-    pub fn pay_for_booking(env: Env, booking_id: u64) {
+    pub fn pay_for_booking(env: Env, booking_id: u64, correlation_id: Symbol) {
         let mut booking = BookingStorage::get(&env, booking_id).expect("Booking not found");
 
         assert!(
@@ -186,7 +212,6 @@ impl BookingContract {
 
         let token_client = token::Client::new(&env, &booking.token);
 
-        // Transfer tokens from passenger to this contract
         token_client.transfer(
             &booking.passenger,
             &env.current_contract_address(),
@@ -198,6 +223,16 @@ impl BookingContract {
 
         BookingStorage::set(&env, booking_id, &booking);
 
+        let audit = ReconciliationAuditRecord {
+            booking_id,
+            actor: booking.passenger.clone(),
+            timestamp: env.ledger().timestamp(),
+            correlation_id,
+            decision_status: symbol_short!("confirmed"),
+            details: symbol_short!("paid"),
+        };
+        BookingStorage::set_audit_record(&env, &audit);
+
         if let Some(receipt_contract) = BookingStorage::get_receipt_contract(&env) {
             let client = BookingReceiptClient::new(&env, &receipt_contract);
             client.mint_receipt(
@@ -206,7 +241,7 @@ impl BookingContract {
                 &booking.flight_number,
                 &booking.from_airport,
                 &booking.to_airport,
-                &String::from_str(&env, "TBD"), // Seat is assigned later or TBD initially
+                &String::from_str(&env, "TBD"),
                 &booking.price,
             );
         }
@@ -224,8 +259,7 @@ impl BookingContract {
         );
     }
 
-    // Release payment to airline - post-flight settlement
-    pub fn release_payment_to_airline(env: Env, booking_id: u64) {
+    pub fn release_payment_to_airline(env: Env, booking_id: u64, correlation_id: Symbol) {
         let mut booking = BookingStorage::get(&env, booking_id).expect("Booking not found");
 
         booking.airline.require_auth();
@@ -250,6 +284,16 @@ impl BookingContract {
 
         BookingStorage::set(&env, booking_id, &booking);
 
+        let audit = ReconciliationAuditRecord {
+            booking_id,
+            actor: booking.airline.clone(),
+            timestamp: env.ledger().timestamp(),
+            correlation_id,
+            decision_status: symbol_short!("completed"),
+            details: symbol_short!("released"),
+        };
+        BookingStorage::set_audit_record(&env, &audit);
+
         contract_events::emit(
             &env,
             Domain::Booking,
@@ -263,14 +307,11 @@ impl BookingContract {
         );
     }
 
-    // Refund passenger for cancelled bookings
-    pub fn refund_passenger(env: Env, booking_id: u64) {
+    pub fn refund_passenger(env: Env, booking_id: u64, correlation_id: Symbol) {
         let mut booking = BookingStorage::get(&env, booking_id).expect("Booking not found");
 
         let current_time = env.ledger().timestamp();
 
-        // For simplicity, require passenger auth and check window
-        // In a real app, airline could also trigger this
         booking.passenger.require_auth();
         assert!(
             current_time < booking.departure_time - 86400,
@@ -298,6 +339,16 @@ impl BookingContract {
 
         BookingStorage::set(&env, booking_id, &booking);
 
+        let audit = ReconciliationAuditRecord {
+            booking_id,
+            actor: booking.passenger.clone(),
+            timestamp: env.ledger().timestamp(),
+            correlation_id,
+            decision_status: symbol_short!("refunded"),
+            details: symbol_short!("refund"),
+        };
+        BookingStorage::set_audit_record(&env, &audit);
+
         contract_events::emit(
             &env,
             Domain::Booking,
@@ -311,44 +362,38 @@ impl BookingContract {
         );
     }
 
-    // Renew the TTL (Time To Live) for a booking entry to prevent pruning
-    // of long-lived persistent storage. This must be called before the entry's
-    // TTL expires to keep the booking record readable for the booking and
-    // dispute lifecycle.
-    //
-    // # Arguments
-    // * `booking_id` - The booking ID whose TTL should be renewed
     pub fn renew_booking_ttl(env: Env, booking_id: u64) {
-        let mut booking = BookingStorage::get(&env, booking_id).expect("Booking not found");
+        let booking = BookingStorage::get(&env, booking_id).expect("Booking not found");
         booking.passenger.require_auth();
         env.storage()
             .persistent()
-            .extend_ttl(&booking_id, /* delta = */ 0);
+            .extend_ttl(&booking_id, 0);
     }
 
-    // Helper to get booking details
     pub fn get_booking(env: Env, booking_id: u64) -> Option<Booking> {
         BookingStorage::get(&env, booking_id)
     }
 
-    // Original API wrappers for backward compatibility
+    pub fn get_reconciliation_audit(env: Env, booking_id: u64) -> Option<ReconciliationAuditRecord> {
+        BookingStorage::get_audit_record(&env, booking_id)
+    }
+
     pub fn cancel_booking(env: Env, passenger: Address, booking_id: u64) {
         passenger.require_auth();
-        Self::refund_passenger(env, booking_id);
+        Self::refund_passenger(env, booking_id, symbol_short!("cancel_legacy"));
     }
 
     pub fn complete_booking(env: Env, airline: Address, booking_id: u64) {
         airline.require_auth();
-        Self::release_payment_to_airline(env, booking_id);
+        Self::release_payment_to_airline(env, booking_id, symbol_short!("complete_legacy"));
     }
 
-    // Settle cancellation payouts from escrow according to refund basis points.
-    // `passenger_refund_bps` is in basis points (10000 = 100%).
     pub fn settle_cancellation(
         env: Env,
         booking_id: u64,
         caller: Address,
         passenger_refund_bps: u32,
+        correlation_id: Symbol,
     ) -> (i128, i128) {
         assert!(passenger_refund_bps <= 10_000, "Invalid refund bps");
 
@@ -404,6 +449,16 @@ impl BookingContract {
         booking.status = symbol_short!("cancelled");
         BookingStorage::set(&env, booking_id, &booking);
 
+        let audit = ReconciliationAuditRecord {
+            booking_id,
+            actor: caller.clone(),
+            timestamp: env.ledger().timestamp(),
+            correlation_id,
+            decision_status: symbol_short!("cancelled"),
+            details: symbol_short!("settled"),
+        };
+        BookingStorage::set_audit_record(&env, &audit);
+
         contract_events::emit(
             &env,
             Domain::Booking,
@@ -420,12 +475,11 @@ impl BookingContract {
         (passenger_refund, airline_amount)
     }
 
-    // Batch post-flight settlement with partial failure handling.
-    // Gas savings come from one auth check and a single transaction envelope.
     pub fn batch_complete_bookings(
         env: Env,
         airline: Address,
         booking_ids: Vec<u64>,
+        correlation_id: Symbol,
     ) -> BatchCompleteBookingsResult {
         airline.require_auth();
         assert!(!booking_ids.is_empty(), "Empty batch");
@@ -493,6 +547,17 @@ impl BookingContract {
             booking.amount_escrowed = 0;
             booking.status = symbol_short!("completed");
             BookingStorage::set(&env, booking_id, &booking);
+
+            let audit = ReconciliationAuditRecord {
+                booking_id,
+                actor: airline.clone(),
+                timestamp: env.ledger().timestamp(),
+                correlation_id,
+                decision_status: symbol_short!("completed"),
+                details: symbol_short!("batch_rel"),
+            };
+            BookingStorage::set_audit_record(&env, &audit);
+
             completed_booking_ids.push_back(booking_id);
 
             contract_events::emit(
@@ -517,8 +582,7 @@ impl BookingContract {
         }
     }
 
-    // Oracle-triggered settlement: called by the oracle contract after flight completion consensus
-    pub fn oracle_release_payment(env: Env, oracle: Address, booking_id: u64) {
+    pub fn oracle_release_payment(env: Env, oracle: Address, booking_id: u64, correlation_id: Symbol) {
         oracle.require_auth();
         let trusted = BookingStorage::get_trusted_oracle(&env).expect("Oracle not configured");
         assert!(oracle == trusted, "Unauthorized oracle");
@@ -543,6 +607,16 @@ impl BookingContract {
         booking.status = symbol_short!("completed");
         BookingStorage::set(&env, booking_id, &booking);
 
+        let audit = ReconciliationAuditRecord {
+            booking_id,
+            actor: oracle.clone(),
+            timestamp: env.ledger().timestamp(),
+            correlation_id,
+            decision_status: symbol_short!("completed"),
+            details: symbol_short!("oracle_rel"),
+        };
+        BookingStorage::set_audit_record(&env, &audit);
+
         contract_events::emit(
             &env,
             Domain::Booking,
@@ -556,8 +630,7 @@ impl BookingContract {
         );
     }
 
-    // Oracle-triggered refund: called by the oracle contract after airline cancellation consensus
-    pub fn oracle_refund_airline_cancel(env: Env, oracle: Address, booking_id: u64) {
+    pub fn oracle_refund_airline_cancel(env: Env, oracle: Address, booking_id: u64, correlation_id: Symbol) {
         oracle.require_auth();
         let trusted = BookingStorage::get_trusted_oracle(&env).expect("Oracle not configured");
         assert!(oracle == trusted, "Unauthorized oracle");
@@ -584,6 +657,16 @@ impl BookingContract {
         booking.status = symbol_short!("refunded");
         BookingStorage::set(&env, booking_id, &booking);
 
+        let audit = ReconciliationAuditRecord {
+            booking_id,
+            actor: oracle.clone(),
+            timestamp: env.ledger().timestamp(),
+            correlation_id,
+            decision_status: symbol_short!("refunded"),
+            details: symbol_short!("oracle_ref"),
+        };
+        BookingStorage::set_audit_record(&env, &audit);
+
         contract_events::emit(
             &env,
             Domain::Booking,
@@ -595,59 +678,5 @@ impl BookingContract {
                 refunded_amount,
             ),
         );
-    }
-}
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ReconciliationAuditRecord {
-    pub correlation_id: String,
-    pub actor: Address,
-    pub timestamp: u64,
-    pub state_before: String,
-    pub state_after: String,
-    pub decision: String,
-}
-
-#[contract]
-pub struct BookingReconciliationContract;
-
-#[contractimpl]
-impl BookingReconciliationContract {
-    pub fn record_audit(
-        env: Env,
-        correlation_id: String,
-        actor: Address,
-        state_before: String,
-        state_after: String,
-        decision: String,
-    ) -> ReconciliationAuditRecord {
-        actor.require_auth();
-        let timestamp = env.ledger().timestamp();
-        let record = ReconciliationAuditRecord {
-            correlation_id,
-            actor,
-            timestamp,
-            state_before,
-            state_after,
-            decision,
-        };
-        let key = Symbol::new(&env, "AuditTrail");
-        let mut records: Vec<ReconciliationAuditRecord> = env
-            .storage()
-            .instance()
-            .get(&key)
-            .unwrap_or(Vec::new(&env));
-        records.push_back(record.clone());
-        env.storage().instance().set(&key, &records);
-        env.storage().instance().extend_ttl(100, 100);
-        record
-    }
-
-    pub fn get_audit_trail(env: Env) -> Vec<ReconciliationAuditRecord> {
-        let key = Symbol::new(&env, "AuditTrail");
-        env.storage()
-            .instance()
-            .get(&key)
-            .unwrap_or(Vec::new(&env))
     }
 }
