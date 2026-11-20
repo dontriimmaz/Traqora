@@ -26,7 +26,7 @@ fn test_reconciliation_audit_trail() {
         &airline,
         &symbol_short!("FL123"),
         &symbol_short!("JFK"),
-        &symbol_short!("LAX\),
+        &symbol_short!("LAX"),
         &1000000,
         &500,
         &token_contract,
