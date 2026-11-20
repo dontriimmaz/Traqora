@@ -32,6 +32,7 @@ module.exports = {
   },
   setupFiles: ['<rootDir>/tests/setup.ts'],
   moduleDirectories: ['node_modules', '<rootDir>/node_modules'],
+  transformIgnorePatterns: ['/node_modules/'],
   transform: {
     '^.+\\.ts$': [
       'ts-jest',
