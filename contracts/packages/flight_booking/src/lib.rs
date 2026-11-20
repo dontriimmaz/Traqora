@@ -45,6 +45,7 @@ impl FlightBookingContract {
     ) -> u64 {
         passenger.require_auth();
         assert!(amount > 0, "Invalid amount");
+        assert!(!flight_id.to_val().is_void(), "Prerequisites not satisfied: invalid flight ID");
 
         let seat_key = (symbol_short!("seat"), flight_id.clone(), seat.clone());
         if env.storage().persistent().has(&seat_key) {

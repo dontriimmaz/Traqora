@@ -338,3 +338,16 @@ fn test_flight_booking_reconcile_reference_timeout_recovery() {
     let id2 = client.reconcile_booking_reference(&passenger, &flight_id, &seat, &1_500, &request_ref);
     assert_eq!(id1, id2);
 }
+
+#[test]
+#[should_panic(expected = "Prerequisites not satisfied: invalid flight ID")]
+fn test_reserve_seat_invalid_flight_id_prerequisites_panic() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let passenger = Address::generate(&env);
+    let contract_id = env.register(FlightBookingContract, ());
+    let client = FlightBookingContractClient::new(&env, &contract_id);
+
+    let invalid_flight = Symbol::new(&env, "");
+    client.reserve_seat(&passenger, &invalid_flight, &Symbol::new(&env, "1A"), &1_000);
+}

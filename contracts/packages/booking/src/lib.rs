@@ -189,6 +189,7 @@ impl BookingContract {
         );
 
         booking.passenger.require_auth();
+        assert!(booking.price > 0, "Prerequisites not satisfied: invalid booking price");
 
         let token_client = token::Client::new(&env, &booking.token);
 
