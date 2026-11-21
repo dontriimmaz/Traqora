@@ -43,6 +43,18 @@ pub struct Booking {
 
 #[contracttype]
 #[derive(Clone)]
+pub struct ReconciliationAuditRecord {
+    pub booking_id: u64,
+    pub actor: Address,
+    pub timestamp: u64,
+    pub correlation_id: Symbol,
+    pub previous_status: Symbol,
+    pub new_status: Symbol,
+    pub decision_reason: Symbol,
+}
+
+#[contracttype]
+#[derive(Clone)]
 pub struct BatchFailure {
     pub index: u32,
     pub booking_id: u64,
@@ -88,6 +100,16 @@ impl BookingStorage {
         env.storage()
             .instance()
             .set(&symbol_short!("receipt_c"), contract);
+    }
+
+    pub fn get_audit_record(env: &Env, booking_id: u64) -> Option<ReconciliationAuditRecord> {
+        env.storage().persistent().get(&symbol_short!("audit"))
+    }
+
+    pub fn set_audit_record(env: &Env, booking_id: u64, record: &ReconciliationAuditRecord) {
+        env.storage()
+            .persistent()
+            .set(&symbol_short!("audit"), record);
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -335,6 +357,53 @@ impl BookingContract {
     // Helper to get booking details
     pub fn get_booking(env: Env, booking_id: u64) -> Option<Booking> {
         BookingStorage::get(&env, booking_id)
+    }
+
+    // Record reconciliation decision and state transition audit trail
+    pub fn record_reconciliation_audit(
+        env: Env,
+        actor: Address,
+        booking_id: u64,
+        correlation_id: Symbol,
+        previous_status: Symbol,
+        new_status: Symbol,
+        decision_reason: Symbol,
+    ) {
+        actor.require_auth();
+
+        let record = ReconciliationAuditRecord {
+            booking_id,
+            actor: actor.clone(),
+            timestamp: env.ledger().timestamp(),
+            correlation_id,
+            previous_status,
+            new_status,
+            decision_reason,
+        };
+
+        BookingStorage::set_audit_record(&env, booking_id, &record);
+
+        contract_events::emit(
+            &env,
+            Domain::Booking,
+            Action::Oracle,
+            (
+                actor,
+                env.ledger().timestamp(),
+                booking_id,
+                record.correlation_id,
+                record.previous_status,
+                record.new_status,
+                record.decision_reason,
+            ),
+        );
+    }
+
+    pub fn get_reconciliation_audit(
+        env: Env,
+        booking_id: u64,
+    ) -> Option<ReconciliationAuditRecord> {
+        BookingStorage::get_audit_record(&env, booking_id)
     }
 
     // Original API wrappers for backward compatibility
