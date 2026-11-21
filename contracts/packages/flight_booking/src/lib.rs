@@ -13,6 +13,18 @@ pub enum BookingState {
 
 #[contracttype]
 #[derive(Clone)]
+pub struct ReconciliationAuditRecord {
+    pub booking_id: u64,
+    pub actor: Address,
+    pub timestamp: u64,
+    pub correlation_id: Symbol,
+    pub previous_state: Symbol,
+    pub new_state: Symbol,
+    pub reason: Symbol,
+}
+
+#[contracttype]
+#[derive(Clone)]
 pub struct Booking {
     pub booking_id: u64,
     pub passenger: Address,
@@ -29,6 +41,7 @@ pub struct Booking {
 enum DataKey {
     NextId,
     Booking(u64),
+    Audit(u64, u64),
 }
 
 #[contract]
@@ -94,6 +107,41 @@ impl FlightBookingContract {
         env.storage()
             .persistent()
             .get(&DataKey::Booking(booking_id))
+    }
+
+    pub fn record_audit_trail(
+        env: Env,
+        booking_id: u64,
+        actor: Address,
+        correlation_id: Symbol,
+        previous_state: Symbol,
+        new_state: Symbol,
+        reason: Symbol,
+    ) {
+        actor.require_auth();
+        let timestamp = env.ledger().timestamp();
+        let record = ReconciliationAuditRecord {
+            booking_id,
+            actor: actor.clone(),
+            timestamp,
+            correlation_id,
+            previous_state,
+            new_state,
+            reason,
+        };
+        env.storage()
+            .persistent()
+            .set(&DataKey::Audit(booking_id, timestamp), &record);
+    }
+
+    pub fn get_audit_trail(
+        env: Env,
+        booking_id: u64,
+        timestamp: u64,
+    ) -> Option<ReconciliationAuditRecord> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::Audit(booking_id, timestamp))
     }
 
     pub fn init_upgrade_owner(env: Env, owner: Address) {

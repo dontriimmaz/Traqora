@@ -26,6 +26,18 @@ pub trait BookingReceiptInterface {
 
 #[contracttype]
 #[derive(Clone)]
+pub struct ReconciliationAuditRecord {
+    pub booking_id: u64,
+    pub actor: Address,
+    pub timestamp: u64,
+    pub correlation_id: Symbol,
+    pub previous_status: Symbol,
+    pub new_status: Symbol,
+    pub decision_reason: Symbol,
+}
+
+#[contracttype]
+#[derive(Clone)]
 pub struct Booking {
     pub booking_id: u64,
     pub passenger: Address,
@@ -101,6 +113,37 @@ impl BookingStorage {
             .instance()
             .set(&symbol_short!("next_id"), &(id + 1));
         id
+    }
+
+    pub fn record_audit_trail(
+        env: &Env,
+        booking_id: u64,
+        actor: &Address,
+        correlation_id: Symbol,
+        previous_status: Symbol,
+        new_status: Symbol,
+        decision_reason: Symbol,
+    ) {
+        let record = ReconciliationAuditRecord {
+            booking_id,
+            actor: actor.clone(),
+            timestamp: env.ledger().timestamp(),
+            correlation_id,
+            previous_status,
+            new_status,
+            decision_reason,
+        };
+        let audit_key = (symbol_short!("audit"), booking_id, env.ledger().timestamp());
+        env.storage().persistent().set(&audit_key, &record);
+    }
+
+    pub fn get_audit_trail(
+        env: &Env,
+        booking_id: u64,
+        timestamp: u64,
+    ) -> Option<ReconciliationAuditRecord> {
+        let audit_key = (symbol_short!("audit"), booking_id, timestamp);
+        env.storage().persistent().get(&audit_key)
     }
 }
 

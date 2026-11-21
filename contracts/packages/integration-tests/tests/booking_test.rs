@@ -87,3 +87,38 @@ fn test_refund_flow() {
     assert_eq!(booking.status, Symbol::new(&env, "refunded"));
     assert_eq!(booking.amount_escrowed, 0);
 }
+
+#[test]
+fn test_reconciliation_audit_trail() {
+    let env = new_env();
+    env.ledger().set_timestamp(1700000000);
+
+    let actors = generate_actors(&env);
+    let contracts = register_contracts(&env);
+
+    let booking_id = 42u64;
+    let correlation_id = Symbol::new(&env, "corr_12345");
+    let prev_status = Symbol::new(&env, "pending");
+    let new_status = Symbol::new(&env, "confirmed");
+    let reason = Symbol::new(&env, "verified_pay");
+
+    contracts.booking.record_audit_trail(
+        &booking_id,
+        &actors.admin,
+        &correlation_id,
+        &prev_status,
+        &new_status,
+        &reason,
+    );
+
+    let audit_record = contracts
+        .booking
+        .get_audit_trail(&booking_id, &1700000000)
+        .unwrap();
+    assert_eq!(audit_record.booking_id, booking_id);
+    assert_eq!(audit_record.actor, actors.admin);
+    assert_eq!(audit_record.correlation_id, correlation_id);
+    assert_eq!(audit_record.previous_status, prev_status);
+    assert_eq!(audit_record.new_status, new_status);
+    assert_eq!(audit_record.decision_reason, reason);
+}

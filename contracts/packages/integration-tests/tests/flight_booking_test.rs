@@ -330,11 +330,47 @@ fn test_flight_booking_reconcile_reference_timeout_recovery() {
     let seat = Symbol::new(&env, "15A");
     let request_ref = Symbol::new(&env, "timeout_ref_999");
 
-    let id1 = client.reconcile_booking_reference(&passenger, &flight_id, &seat, &1_500, &request_ref);
+    let id1 =
+        client.reconcile_booking_reference(&passenger, &flight_id, &seat, &1_500, &request_ref);
     let booking1 = client.get_booking(&id1).unwrap();
     assert_eq!(booking1.seat, seat);
 
     // Retry with same request ref after timeout should return the exact same booking id without duplicate reservation error
-    let id2 = client.reconcile_booking_reference(&passenger, &flight_id, &seat, &1_500, &request_ref);
+    let id2 =
+        client.reconcile_booking_reference(&passenger, &flight_id, &seat, &1_500, &request_ref);
     assert_eq!(id1, id2);
+}
+
+#[test]
+fn test_flight_booking_reconciliation_audit_trail() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set_timestamp(123456);
+
+    let passenger = Address::generate(&env);
+    let contract_id = env.register(FlightBookingContract, ());
+    let client = FlightBookingContractClient::new(&env, &contract_id);
+
+    let booking_id = 100u64;
+    let correlation_id = Symbol::new(&env, "flight_corr_999");
+    let prev_state = Symbol::new(&env, "Pending");
+    let new_state = Symbol::new(&env, "Confirmed");
+    let reason = Symbol::new(&env, "Reconciled");
+
+    client.record_audit_trail(
+        &booking_id,
+        &passenger,
+        &correlation_id,
+        &prev_state,
+        &new_state,
+        &reason,
+    );
+
+    let audit = client.get_audit_trail(&booking_id, &123456).unwrap();
+    assert_eq!(audit.booking_id, booking_id);
+    assert_eq!(audit.actor, passenger);
+    assert_eq!(audit.correlation_id, correlation_id);
+    assert_eq!(audit.previous_state, prev_state);
+    assert_eq!(audit.new_state, new_state);
+    assert_eq!(audit.reason, reason);
 }
