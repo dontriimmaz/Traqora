@@ -48,12 +48,13 @@ export default function BookingConfirmationScreen({
   selfTransferExplanation,
 }: BookingConfirmationProps) {
   const hasSelfTransfer = itinerary.some((seg) => seg.separateTicket === true);
+  const isConfirmed = paymentStatus === 'confirmed';
 
   return (
     <div className="booking-confirmation-container">
       <div className="content">
         <div className="header-container">
-          <h1 className="success-title">Booking Confirmed!</h1>
+          <h1 className="success-title">{isConfirmed ? 'Booking Confirmed!' : 'Booking Processing'}</h1>
           <p className="booking-ref">Reference: TRAQ-{bookingId}</p>
         </div>
 

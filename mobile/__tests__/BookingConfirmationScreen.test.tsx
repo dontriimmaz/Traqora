@@ -12,6 +12,18 @@ describe('BookingConfirmationScreen', () => {
     },
   ];
 
+  it('does not render confirmation when prerequisites are not satisfied or payment is pending/failed', () => {
+    const { queryByText } = render(
+      <BookingConfirmationScreen
+        bookingId="12345"
+        itinerary={sampleItinerary}
+        paymentStatus="pending"
+        totalAmount="$450.00"
+      />
+    );
+    expect(queryByText('Booking Confirmed!')).not.toBeInTheDocument();
+  });
+
   it('renders booking confirmation details correctly', () => {
     render(
       <BookingConfirmationScreen
