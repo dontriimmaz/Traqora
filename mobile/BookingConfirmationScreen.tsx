@@ -48,6 +48,28 @@ export default function BookingConfirmationScreen({
   selfTransferExplanation,
 }: BookingConfirmationProps) {
   const hasSelfTransfer = itinerary.some((seg) => seg.separateTicket === true);
+  const isConfirmed = paymentStatus === 'confirmed' || paymentStatus === 'paid';
+
+  if (!isConfirmed) {
+    return (
+      <div className="booking-confirmation-container">
+        <div className="content">
+          <div className="header-container">
+            <h1 className="success-title">Booking Pending Confirmation</h1>
+            <p className="booking-ref">Reference: TRAQ-{bookingId}</p>
+          </div>
+          <div className="card">
+            <h2 className="section-title">Payment Status</h2>
+            <div className="status-row">
+              <span className="label">Status:</span>
+              <span className="value capitalize">{paymentStatus}</span>
+            </div>
+            <p className="notice-text">Confirmation notifications are withheld until all payment and booking prerequisites are fully satisfied.</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="booking-confirmation-container">
