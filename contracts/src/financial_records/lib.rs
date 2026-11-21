@@ -1,4 +1,4 @@
-use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, Env, Symbol};
+use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, Env, Symbol, String, Vec};
 
 /// A payment record stored in the financial ledger.
 #[contracttype]
@@ -11,6 +11,18 @@ pub struct PaymentRecord {
     pub recorded_at: u64,
 }
 
+/// An audit trail entry recording state changes and reconciliation decisions.
+#[contracttype]
+#[derive(Clone)]
+pub struct ReconciliationAuditEntry {
+    pub audit_id: u64,
+    pub actor: Address,
+    pub timestamp: u64,
+    pub correlation_id: String,
+    pub action_type: Symbol,
+    pub decision_details: String,
+}
+
 // ── Storage helpers ──────────────────────────────────────────────────────────
 
 fn payment_key(payment_id: u64) -> (Symbol, u64) {
@@ -19,6 +31,14 @@ fn payment_key(payment_id: u64) -> (Symbol, u64) {
 
 fn next_payment_key() -> Symbol {
     symbol_short!("nxt_pay")
+}
+
+fn audit_key(audit_id: u64) -> (Symbol, u64) {
+    (symbol_short!("audit"), audit_id)
+}
+
+fn next_audit_key() -> Symbol {
+    symbol_short!("nxt_aud")
 }
 
 // ── Contract ─────────────────────────────────────────────────────────────────
@@ -68,6 +88,48 @@ impl FinancialRecordsContract {
             .get(&payment_key(payment_id))
             .expect("payment not found")
     }
+
+    /// Record a reconciliation audit trail entry. Returns the assigned audit_id.
+    pub fn record_reconciliation_audit(
+        env: Env,
+        actor: Address,
+        timestamp: u64,
+        correlation_id: String,
+        action_type: Symbol,
+        decision_details: String,
+    ) -> u64 {
+        actor.require_auth();
+
+        let audit_id: u64 = env
+            .storage()
+            .instance()
+            .get(&next_audit_key())
+            .unwrap_or(1u64);
+        env.storage()
+            .instance()
+            .set(&next_audit_key(), &(audit_id + 1));
+
+        let entry = ReconciliationAuditEntry {
+            audit_id,
+            actor,
+            timestamp,
+            correlation_id,
+            action_type,
+            decision_details,
+        };
+        env.storage()
+            .persistent()
+            .set(&audit_key(audit_id), &entry);
+        audit_id
+}
+
+    /// Retrieve a reconciliation audit entry by id.
+    pub fn get_reconciliation_audit(env: Env, audit_id: u64) -> ReconciliationAuditEntry {
+        env.storage()
+            .persistent()
+            .get(&audit_key(audit_id))
+            .expect("audit entry not found")
+    }
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -93,5 +155,32 @@ mod tests {
         let record = client.get_payment(&payment_id);
         assert_eq!(record.amount, 500);
         assert_eq!(record.payer, payer);
+    }
+
+    #[test]
+    fn test_reconciliation_audit_trail() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let id = env.register_contract(None, FinancialRecordsContract);
+        let client = FinancialRecordsContractClient::new(&env, &id);
+
+        let actor = Address::generate(&env);
+        let correlation_id = String::from_str(&env, "CORR-999");
+        let action_type = symbol_short!("reconcile");
+        let decision_details = String::from_str(&env, "State reconciled successfully with ledger");
+
+        let audit_id = client.record_reconciliation_audit(
+            &actor,
+            &2000u64,
+            &correlation_id,
+            &action_type,
+            &decision_details,
+        );
+        assert_eq!(audit_id, 1);
+
+        let audit_entry = client.get_reconciliation_audit(&audit_id);
+        assert_eq!(audit_entry.actor, actor);
+        assert_eq!(audit_entry.timestamp, 2000);
+        assert_eq!(audit_entry.action_type, action_type);
     }
 }

@@ -32,6 +32,9 @@ An optional token-based governance system allows users to vote on proposed proto
 ### Loyalty Program
 Frequent travelers are rewarded through a decentralized loyalty program built into the protocol.
 
+### Reconciliation Audit Trail
+Records state changes and reconciliation decisions with actor, timestamp, and correlation identifiers.
+
 ## Technology Stack
 
 Traqora is built using a robust and scalable tech stack designed for performance and security on the Stellar network.
