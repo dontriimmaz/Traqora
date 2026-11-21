@@ -337,6 +337,66 @@ impl BookingContract {
         BookingStorage::get(&env, booking_id)
     }
 
+    // List bookings for a passenger
+    pub fn get_passenger_bookings(
+        env: Env,
+        passenger: Address,
+        booking_ids: Vec<u64>,
+    ) -> Vec<Booking> {
+        let mut result = Vec::new(&env);
+        let mut i: u32 = 0;
+        while i < booking_ids.len() {
+            let id = booking_ids.get(i).unwrap();
+            if let Some(booking) = BookingStorage::get(&env, id) {
+                if booking.passenger == passenger {
+                    result.push_back(booking);
+                }
+            }
+            i += 1;
+        }
+        result
+    }
+
+    pub fn get_upcoming_passenger_bookings(
+        env: Env,
+        passenger: Address,
+        current_time: u64,
+        booking_ids: Vec<u64>,
+    ) -> Vec<Booking> {
+        let mut result = Vec::new(&env);
+        let mut i: u32 = 0;
+        while i < booking_ids.len() {
+            let id = booking_ids.get(i).unwrap();
+            if let Some(booking) = BookingStorage::get(&env, id) {
+                if booking.passenger == passenger && booking.departure_time >= current_time {
+                    result.push_back(booking);
+                }
+            }
+            i += 1;
+        }
+        result
+    }
+
+    pub fn get_past_passenger_bookings(
+        env: Env,
+        passenger: Address,
+        current_time: u64,
+        booking_ids: Vec<u64>,
+    ) -> Vec<Booking> {
+        let mut result = Vec::new(&env);
+        let mut i: u32 = 0;
+        while i < booking_ids.len() {
+            let id = booking_ids.get(i).unwrap();
+            if let Some(booking) = BookingStorage::get(&env, id) {
+                if booking.passenger == passenger && booking.departure_time < current_time {
+                    result.push_back(booking);
+                }
+            }
+            i += 1;
+        }
+        result
+    }
+
     // Original API wrappers for backward compatibility
     pub fn cancel_booking(env: Env, passenger: Address, booking_id: u64) {
         passenger.require_auth();
