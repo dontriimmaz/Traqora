@@ -57,6 +57,18 @@ pub struct BatchCompleteBookingsResult {
     pub total_released: i128,
 }
 
+#[contracttype]
+#[derive(Clone)]
+pub struct ReconciliationAuditEntry {
+    pub booking_id: u64,
+    pub actor: Address,
+    pub timestamp: u64,
+    pub correlation_id: Symbol,
+    pub previous_status: Symbol,
+    pub new_status: Symbol,
+    pub decision_reason: Symbol,
+}
+
 pub struct BookingStorage;
 
 const MAX_BATCH_SIZE: u32 = 50;
@@ -88,6 +100,26 @@ impl BookingStorage {
         env.storage()
             .instance()
             .set(&symbol_short!("receipt_c"), contract);
+    }
+
+    pub fn record_audit_trail(env: &Env, entry: &ReconciliationAuditEntry) {
+        let count: u64 = env
+            .storage()
+            .persistent()
+            .get(&symbol_short!("aud_cnt"))
+            .unwrap_or(0);
+        env.storage()
+            .persistent()
+            .set(&(symbol_short!("audit_"), count), entry);
+        env.storage()
+            .persistent()
+            .set(&symbol_short!("aud_cnt"), &(count + 1));
+    }
+
+    pub fn get_audit_trail(env: &Env, index: u64) -> Option<ReconciliationAuditEntry> {
+        env.storage()
+            .persistent()
+            .get(&(symbol_short!("audit_"), index))
     }
 
     #[allow(clippy::too_many_arguments)]
