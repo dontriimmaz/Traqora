@@ -330,11 +330,50 @@ fn test_flight_booking_reconcile_reference_timeout_recovery() {
     let seat = Symbol::new(&env, "15A");
     let request_ref = Symbol::new(&env, "timeout_ref_999");
 
-    let id1 = client.reconcile_booking_reference(&passenger, &flight_id, &seat, &1_500, &request_ref);
+    let id1 =
+        client.reconcile_booking_reference(&passenger, &flight_id, &seat, &1_500, &request_ref);
     let booking1 = client.get_booking(&id1).unwrap();
     assert_eq!(booking1.seat, seat);
 
     // Retry with same request ref after timeout should return the exact same booking id without duplicate reservation error
-    let id2 = client.reconcile_booking_reference(&passenger, &flight_id, &seat, &1_500, &request_ref);
+    let id2 =
+        client.reconcile_booking_reference(&passenger, &flight_id, &seat, &1_500, &request_ref);
     assert_eq!(id1, id2);
+}
+
+#[test]
+fn test_reconciliation_audit_trail_normal_path() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let actor = Address::generate(&env);
+    let contract_id = env.register(FlightBookingContract, ());
+    let client = FlightBookingContractClient::new(&env, &contract_id);
+
+    let booking_id = 101u64;
+    let correlation_id = Symbol::new(&env, "corr_norm_01");
+    let status = Symbol::new(&env, "matched");
+
+    client.record_reconciliation_audit(&actor, &booking_id, &correlation_id, &status);
+
+    let events = env.events().all();
+    assert!(
+        !events.is_empty(),
+        "Reconciliation audit event should be emitted"
+    );
+}
+
+#[test]
+#[should_panic]
+fn test_reconciliation_audit_trail_auth_failure_path() {
+    let env = Env::default();
+    // Do NOT mock auths — record_reconciliation_audit requires auth
+    let actor = Address::generate(&env);
+    let contract_id = env.register(FlightBookingContract, ());
+    let client = FlightBookingContractClient::new(&env, &contract_id);
+
+    let booking_id = 102u64;
+    let correlation_id = Symbol::new(&env, "corr_fail_01");
+    let status = Symbol::new(&env, "mismatch");
+
+    client.record_reconciliation_audit(&actor, &booking_id, &correlation_id, &status);
 }

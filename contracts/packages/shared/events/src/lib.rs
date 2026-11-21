@@ -95,6 +95,8 @@ pub enum Domain {
     Multisig,
     /// Flight status oracle.
     Oracle,
+    /// Reconciliation audit trail.
+    Reconciliation,
 }
 
 impl Domain {
@@ -135,6 +137,7 @@ impl Domain {
             Domain::Storage => symbol_short!("storage"),
             Domain::Multisig => symbol_short!("multisig"),
             Domain::Oracle => symbol_short!("oracle"),
+            Domain::Reconciliation => symbol_short!("recon"),
         }
     }
 }
@@ -202,6 +205,7 @@ pub enum Action {
     Unpaused,
     Reserved,
     Oracle,
+    Audited,
 }
 
 impl Action {
@@ -268,6 +272,7 @@ impl Action {
             Action::Unpaused => symbol_short!("unpaused"),
             Action::Reserved => symbol_short!("reserved"),
             Action::Oracle => symbol_short!("oracle"),
+            Action::Audited => symbol_short!("audited"),
         }
     }
 }

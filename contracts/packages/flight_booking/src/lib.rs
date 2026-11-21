@@ -96,6 +96,23 @@ impl FlightBookingContract {
             .get(&DataKey::Booking(booking_id))
     }
 
+    pub fn record_reconciliation_audit(
+        env: Env,
+        actor: Address,
+        booking_id: u64,
+        correlation_id: Symbol,
+        status: Symbol,
+    ) {
+        actor.require_auth();
+        let timestamp = env.ledger().timestamp();
+        contract_events::emit(
+            &env,
+            Domain::Reconciliation,
+            Action::Audited,
+            (actor.clone(), timestamp, booking_id, correlation_id, status),
+        );
+    }
+
     pub fn init_upgrade_owner(env: Env, owner: Address) {
         access::UpgradeTimelock::init_upgrade_owner(&env, &owner);
     }
