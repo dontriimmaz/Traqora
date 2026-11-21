@@ -183,10 +183,12 @@ impl BookingContract {
     pub fn pay_for_booking(env: Env, booking_id: u64) {
         let mut booking = BookingStorage::get(&env, booking_id).expect("Booking not found");
 
+        // Prerequisites check: verify booking status and price validity before confirmation prerequisites are satisfied
         assert!(
             booking.status == symbol_short!("pending"),
             "Already paid or cancelled"
         );
+        assert!(booking.price > 0, "Invalid booking price");
 
         booking.passenger.require_auth();
 
